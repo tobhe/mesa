@@ -2238,6 +2238,11 @@ agx_compile_function_nir(nir_shader *nir, nir_function_impl *impl,
       }
    }
 
+   if (agx_should_dump(nir, AGX_DBG_SHADERS)) {
+      agx_disassemble_stdout(binary->data + offset, binary->size - offset);
+      fflush(stdout);
+   }
+
    ralloc_free(ctx);
 
    return offset;
