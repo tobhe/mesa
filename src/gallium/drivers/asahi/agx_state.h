@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <xf86drm.h>
 #include "asahi/compiler/agx_compile.h"
 #include "asahi/genxml/agx_pack.h"
 #include "asahi/layout/layout.h"
@@ -18,6 +19,7 @@
 #include "asahi/lib/shaders/geometry.h"
 #include "compiler/nir/nir_lower_blend.h"
 #include "compiler/shader_enums.h"
+#include "drm-uapi/asahi_drm.h"
 #include "gallium/auxiliary/util/u_blitter.h"
 #include "gallium/include/pipe/p_context.h"
 #include "gallium/include/pipe/p_screen.h"
@@ -297,6 +299,8 @@ struct agx_stage {
 };
 
 union agx_batch_result {
+   struct drm_asahi_result_render render;
+   struct drm_asahi_result_compute compute;
 };
 
 /* This is a firmware limit. It should be possible to raise to 2048 in the
@@ -1022,9 +1026,12 @@ agx_batch_add_bo(struct agx_batch *batch, struct agx_bo *bo)
 #define AGX_BATCH_FOREACH_BO_HANDLE(batch, handle)                             \
    BITSET_FOREACH_SET(handle, (batch)->bo_list.set, batch->bo_list.bit_count)
 
+struct drm_asahi_cmd_compute;
+struct drm_asahi_cmd_render;
+
 void agx_batch_submit(struct agx_context *ctx, struct agx_batch *batch,
-                      uint32_t barriers, enum drm_asahi_cmd_type cmd_type,
-                      void *cmdbuf);
+                      struct drm_asahi_cmd_compute *compute,
+                      struct drm_asahi_cmd_render *render);
 
 void agx_flush_batch(struct agx_context *ctx, struct agx_batch *batch);
 void agx_flush_batch_for_reason(struct agx_context *ctx,
