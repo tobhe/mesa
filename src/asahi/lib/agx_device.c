@@ -379,15 +379,75 @@ agx_bo_unreference(struct agx_bo *bo)
 struct agx_bo *
 agx_bo_import(struct agx_device *dev, int fd)
 {
-   unreachable("Linux UAPI not yet upstream");
+#ifndef __APPLE__
+   struct agx_bo *bo;
+   struct drm_asahi_get_bo_offset get_bo_offset = {0,};
+   ASSERTED int ret;
+   unsigned gem_handle;
+
+   ret = drmPrimeFDToHandle(dev->fd, fd, &gem_handle);
+   assert(!ret);
+
+   pthread_mutex_lock(&dev->bo_map_lock);
+   bo = agx_lookup_bo(dev, gem_handle);
+
+   if (!bo->dev) {
+      get_bo_offset.handle = gem_handle;
+      ret = drmIoctl(dev->fd, DRM_IOCTL_ASAHI_GET_BO_OFFSET, &get_bo_offset);
+      assert(!ret);
+
+      bo->dev = dev;
+      bo->ptr.gpu = get_bo_offset.offset;
+      bo->size = lseek(fd, 0, SEEK_END);
+      /* Sometimes this can fail and return -1. size of -1 is not
+      * a nice thing for mmap to try mmap. Be more robust also
+      * for zero sized maps and fail nicely too
+      */
+      if ((bo->size == 0) || (bo->size == (size_t)-1)) {
+            pthread_mutex_unlock(&dev->bo_map_lock);
+            return NULL;
+      }
+      bo->flags = AGX_BO_SHARED;
+      bo->handle = gem_handle;
+      p_atomic_set(&bo->refcnt, 1);
+   } else {
+      /* bo->refcnt == 0 can happen if the BO
+      * was being released but agx_bo_import() acquired the
+      * lock before agx_bo_unreference(). In that case, refcnt
+      * is 0 and we can't use agx_bo_reference() directly, we
+      * have to re-initialize the refcnt().
+      * Note that agx_bo_unreference() checks
+      * refcnt value just after acquiring the lock to
+      * make sure the object is not freed if agx_bo_import()
+      * acquired it in the meantime.
+      */
+      if (p_atomic_read(&bo->refcnt) == 0)
+         p_atomic_set(&bo->refcnt, 1);
+      else
+         agx_bo_reference(bo);
+   }
+   pthread_mutex_unlock(&dev->bo_map_lock);
+
+   return bo;
+#else
+   return NULL;
+#endif
 }
 
 int
 agx_bo_export(struct agx_bo *bo)
 {
-   bo->flags |= AGX_BO_SHARED;
+#ifndef __APPLE__
+   int fd;
 
-   unreachable("Linux UAPI not yet upstream");
+   if (drmPrimeHandleToFD(bo->dev->fd, bo->handle, DRM_CLOEXEC, &fd))
+      return -1;
+
+   bo->flags |= AGX_BO_SHARED;
+   return fd;
+#else
+   return 0;
+#endif
 }
 
 struct agx_bo *
