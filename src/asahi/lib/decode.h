@@ -33,6 +33,7 @@ void agxdecode_next_frame(void);
 void agxdecode_close(void);
 
 void agxdecode_cmdstream(unsigned cmdbuf_index, unsigned map_index, bool verbose);
+void agxdecode_dri_cmdstream(unsigned cmdbuf_handle, unsigned map_handle, bool verbose);
 
 void agxdecode_dump_file_open(void);
 
