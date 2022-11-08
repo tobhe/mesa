@@ -32,7 +32,14 @@
 #if __APPLE__
 #include <mach/mach.h>
 #include <IOKit/IOKitLib.h>
+#else
+#include "drm-uapi/asahi_drm.h"
 #endif
+
+// TODO: this is a lie right now
+static const uint64_t AGX_SUPPORTED_INCOMPAT_FEATURES =
+   DRM_ASAHI_FEAT_MANDATORY_ZS_COMPRESSION;
+
 
 enum agx_dbg {
    AGX_DBG_TRACE = BITFIELD_BIT(0),
@@ -42,6 +49,18 @@ enum agx_dbg {
    AGX_DBG_PRECOMPILE  = BITFIELD_BIT(4),
    AGX_DBG_PERF  = BITFIELD_BIT(5),
    AGX_DBG_NOCOMPRESS = BITFIELD_BIT(6),
+};
+
+struct agx_device_id {
+   char name[64];
+
+   int generation;
+   char variant;
+   int revision;
+   uint32_t chip_id;
+
+   uint64_t feat_compat;
+   uint64_t feat_incompat;
 };
 
 /* How many power-of-two levels in the BO cache do we want? 2^14 minimum chosen
@@ -56,6 +75,8 @@ enum agx_dbg {
 struct agx_device {
    void *memctx;
    uint32_t debug;
+
+   struct agx_device_id id;
 
    /* XXX What to bind to? I don't understand the IOGPU UABI */
    struct agx_command_queue queue;
@@ -119,9 +140,15 @@ struct agx_command_queue
 agx_create_command_queue(struct agx_device *dev);
 
 void
-agx_submit_cmdbuf(struct agx_device *dev, unsigned cmdbuf, unsigned mappings, uint64_t scalar);
+agx_submit_cmdbuf(struct agx_device *dev, struct agx_bo *cmdbuf, unsigned mappings, uint64_t scalar);
 
 void
 agx_wait_queue(struct agx_command_queue queue);
+
+void
+agx_bo_mmap(struct agx_bo *bo);
+
+const char *
+agx_get_revision_string(const struct agx_device_id *id);
 
 #endif

@@ -24,6 +24,8 @@
 #ifndef __ASAHI_MAGIC_H
 #define __ASAHI_MAGIC_H
 
+#include "asahi/lib/agx_tilebuffer.h"
+
 unsigned
 demo_cmdbuf(uint64_t *buf, size_t size,
             struct agx_pool *pool,
@@ -39,7 +41,8 @@ demo_cmdbuf(uint64_t *buf, size_t size,
             bool clear_pipeline_textures,
             unsigned clear_buffers,
             double clear_depth,
-            unsigned clear_stencil);
+            unsigned clear_stencil,
+            struct agx_tilebuffer_layout *tib);
 
 void
 demo_mem_map(void *map, size_t size, unsigned *handles,

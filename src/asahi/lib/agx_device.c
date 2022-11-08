@@ -27,16 +27,19 @@
 #include "agx_bo.h"
 #include "decode.h"
 
-unsigned AGX_FAKE_HANDLE = 0;
-uint64_t AGX_FAKE_LO = 0;
-uint64_t AGX_FAKE_HI = (1ull << 32);
+#ifndef __APPLE__
+#include <fcntl.h>
+#include <xf86drm.h>
+#include "drm-uapi/asahi_drm.h"
+#include "util/os_mman.h"
+#endif
 
 static void
 agx_bo_free(struct agx_device *dev, struct agx_bo *bo)
 {
-#if __APPLE__
    const uint64_t handle = bo->handle;
 
+#if __APPLE__
    kern_return_t ret = IOConnectCallScalarMethod(dev->fd,
                        AGX_SELECTOR_FREE_MEM,
                        &handle, 1, NULL, NULL);
@@ -44,7 +47,9 @@ agx_bo_free(struct agx_device *dev, struct agx_bo *bo)
    if (ret)
       fprintf(stderr, "error freeing BO mem: %u\n", ret);
 #else
-   free(bo->ptr.cpu);
+   munmap(bo->ptr.cpu, bo->size);
+   struct drm_gem_close args = { .handle = handle };
+   drmIoctl(dev->fd, DRM_IOCTL_GEM_CLOSE, &args);
 #endif
 
    /* Reset the handle */
@@ -94,15 +99,16 @@ agx_shmem_alloc(struct agx_device *dev, size_t size, bool cmdbuf)
       .handle = out.id,
       .ptr.cpu = out.map,
       .size = out.size,
-      .guid = 0, /* TODO? */
    };
 #else
+   /* TODO: This doesn't make any sense on Linux... Lina send help! */
+   static int fake_shmem_handle = 0;
+
    bo = (struct agx_bo) {
       .type = cmdbuf ? AGX_ALLOC_CMDBUF : AGX_ALLOC_MEMMAP,
-      .handle = AGX_FAKE_HANDLE++,
       .ptr.cpu = calloc(1, size),
       .size = size,
-      .guid = 0, /* TODO? */
+      .handle = fake_shmem_handle++,
    };
 #endif
 
@@ -111,6 +117,35 @@ agx_shmem_alloc(struct agx_device *dev, size_t size, bool cmdbuf)
 
    return bo;
 }
+
+#ifndef __APPLE__
+void
+agx_bo_mmap(struct agx_bo *bo)
+{
+   struct drm_asahi_mmap_bo mmap_bo = { .handle = bo->handle };
+   int ret;
+
+   if (bo->ptr.cpu)
+      return;
+
+   ret = drmIoctl(bo->dev->fd, DRM_IOCTL_ASAHI_MMAP_BO, &mmap_bo);
+   if (ret) {
+      fprintf(stderr, "DRM_IOCTL_ASAHI_MMAP_BO failed: %m\n");
+      assert(0);
+   }
+
+   bo->ptr.cpu = os_mmap(NULL, bo->size, PROT_READ | PROT_WRITE, MAP_SHARED,
+         bo->dev->fd, mmap_bo.offset);
+   if (bo->ptr.cpu == MAP_FAILED) {
+      bo->ptr.cpu = NULL;
+      fprintf(stderr,
+            "mmap failed: result=%p size=0x%llx fd=%i offset=0x%llx %m\n",
+            bo->ptr.cpu, (long long)bo->size, bo->dev->fd,
+            (long long)mmap_bo.offset);
+   }
+}
+
+#endif
 
 static struct agx_bo *
 agx_bo_alloc(struct agx_device *dev, size_t size,
@@ -139,8 +174,29 @@ agx_bo_alloc(struct agx_device *dev, size_t size,
    assert(out_sz == sizeof(out));
    handle = (out[3] >> 32ull);
 #else
-   /* Faked software path until we have a DRM driver */
-   handle = (++AGX_FAKE_HANDLE);
+   struct drm_asahi_create_bo create_bo = {
+      .size = size
+   };
+
+   switch (flags) {
+      case AGX_MEMORY_TYPE_NORMAL:
+      case AGX_MEMORY_TYPE_FRAMEBUFFER:
+         create_bo.flags = 0;
+         break;
+
+      case AGX_MEMORY_TYPE_SHADER:
+      case AGX_MEMORY_TYPE_CMDBUF_32:
+         create_bo.flags = ASAHI_BO_PIPELINE;
+         break;
+   }
+
+   int ret = drmIoctl(dev->fd, DRM_IOCTL_ASAHI_CREATE_BO, &create_bo);
+   if (ret) {
+      fprintf(stderr, "DRM_IOCTL_ASAHI_CREATE_BO failed: %m\n");
+      return NULL;
+   }
+
+   handle = create_bo.handle;
 #endif
 
    pthread_mutex_lock(&dev->bo_map_lock);
@@ -163,16 +219,10 @@ agx_bo_alloc(struct agx_device *dev, size_t size,
    bo->ptr.cpu = (void *) out[1];
    bo->guid = out[5];
 #else
-   if (lo) {
-      bo->ptr.gpu = AGX_FAKE_LO;
-      AGX_FAKE_LO += bo->size;
-   } else {
-      bo->ptr.gpu = AGX_FAKE_HI;
-      AGX_FAKE_HI += bo->size;
-   }
+   bo->ptr.gpu = create_bo.offset;
+   bo->guid = bo->handle; /* TODO: We don't care about guids */
 
-   bo->ptr.gpu = (((uint64_t) bo->handle) << (lo ? 16 : 24));
-   bo->ptr.cpu = calloc(1, bo->size);
+   agx_bo_mmap(bo);
 #endif
 
    assert(bo->ptr.gpu < (1ull << (lo ? 32 : 40)));
@@ -529,17 +579,64 @@ agx_get_global_id(struct agx_device *dev)
    return dev->next_global_id++;
 }
 
+#ifdef __APPLE__
 /* Tries to open an AGX device, returns true if successful */
+
+const char *services[] = {
+   "AGXAcceleratorG13G_A0",
+   "AGXAcceleratorG13G_B0",
+   "AGXAcceleratorG13S_A0",
+   "AGXAcceleratorG13X",
+   "AGXAcceleratorG14G_A0",
+   "AGXAcceleratorG14G",
+
+};
+
+const agx_device_id agx_device_ids[] = {
+   { .generation = 13, .variant = 'G', .revision = DRM_ASAHI_REV_A0 },
+   { .generation = 13, .variant = 'G', .revision = DRM_ASAHI_REV_B0 },
+   { .generation = 13, .variant = 'S', .revision = DRM_ASAHI_REV_A0 },
+   // TODO: Can we get the real revision on macOS?
+   { .generation = 13, .variant = 'X', .revision = DRM_ASAHI_REV_B0 },
+   { .generation = 14, .variant = 'G', .revision = DRM_ASAHI_REV_A0 },
+   { .generation = 14, .variant = 'G', .revision = DRM_ASAHI_REV_B0 },
+};
+
+#endif
+
+#ifndef __APPLE__
+static bool
+agx_get_param(struct agx_device *dev, uint32_t param, uint64_t *value) {
+   struct drm_asahi_get_param get_param = {
+      .param = param,
+   };
+
+   int ret = drmIoctl(dev->fd, DRM_IOCTL_ASAHI_GET_PARAM, &get_param);
+   if (ret) {
+      fprintf(stderr, "DRM_IOCTL_ASAHI_GET_PARAM(%d) failed: %m\n", param);
+      return false;
+   }
+   *value = get_param.value;
+   return true;
+}
+#endif
 
 bool
 agx_open_device(void *memctx, struct agx_device *dev)
 {
 #if __APPLE__
    kern_return_t ret;
+   io_service_t service;
+   int i;
 
-   /* TODO: Support other models */
-   CFDictionaryRef matching = IOServiceNameMatching("AGXAcceleratorG13G_B0");
-   io_service_t service = IOServiceGetMatchingService(0, matching);
+   for (i = 0; i < ARRAY_SIZE(services); i++) {
+      CFDictionaryRef matching = IOServiceNameMatching(services[i]);
+      service = IOServiceGetMatchingService(0, matching);
+      if (service) {
+         dev->id = agx_device_ids[i];
+         break;
+      }
+   }
 
    if (!service)
       return false;
@@ -560,7 +657,87 @@ agx_open_device(void *memctx, struct agx_device *dev)
    /* Oddly, the return codes are flipped for SET_API */
    if (ret != 1)
       return false;
-#endif
+#else
+   uint64_t val;
+
+   if (!agx_get_param(dev, DRM_ASAHI_PARAM_UNSTABLE_UABI_VERSION, &val)) {
+      assert(0);
+      return false;
+   }
+
+   if (val != DRM_ASAHI_UNSTABLE_UABI_VERSION) {
+      fprintf(stderr, "UABI mismatch: Kernel %ld, Mesa %d\n",
+              val, DRM_ASAHI_UNSTABLE_UABI_VERSION);
+      assert(0);
+      return false;
+   }
+
+   if (!agx_get_param(dev, DRM_ASAHI_PARAM_GPU_GENERATION, &val)) {
+      assert(0);
+      return false;
+   }
+   dev->id.generation = val;
+
+   if (!agx_get_param(dev, DRM_ASAHI_PARAM_GPU_VARIANT, &val)) {
+      assert(0);
+      return false;
+   }
+   dev->id.variant = val;
+
+   if (!agx_get_param(dev, DRM_ASAHI_PARAM_GPU_REVISION, &val)) {
+      assert(0);
+      return false;
+   }
+   dev->id.revision = val;
+
+   if (!agx_get_param(dev, DRM_ASAHI_PARAM_CHIP_ID, &val)) {
+      assert(0);
+      return false;
+   }
+   dev->id.chip_id = val;
+
+   if (!agx_get_param(dev, DRM_ASAHI_PARAM_FEAT_COMPAT, &val)) {
+      assert(0);
+      return false;
+   }
+   dev->id.feat_compat = val;
+
+   if (!agx_get_param(dev, DRM_ASAHI_PARAM_FEAT_INCOMPAT, &val)) {
+      assert(0);
+      return false;
+   }
+   dev->id.feat_incompat = val;
+
+   uint64_t incompat = val & (~AGX_SUPPORTED_INCOMPAT_FEATURES);
+   if (incompat) {
+      fprintf(stderr, "Missing GPU incompat features: 0x%lx\n", incompat);
+      assert(0);
+      return false;
+   }
+   #endif
+
+   if (dev->id.generation >= 13 && dev->id.variant != 'P') {
+      const char *variant = " Unknown";
+      switch (dev->id.variant) {
+         case 'G': variant = ""; break;
+         case 'S': variant = " Pro"; break;
+         case 'C': variant = " Max"; break;
+         case 'D': variant = " Ultra"; break;
+      }
+      snprintf(dev->id.name, sizeof(dev->id.name), "Apple M%d%s (G%d%c %s)",
+               dev->id.generation - 12, variant, dev->id.generation, dev->id.variant,
+               agx_get_revision_string(&dev->id));
+   } else {
+      // Note: untested, theoretically this is the logic for at least a few generations back.
+      const char *variant = " Unknown";
+      switch (dev->id.variant) {
+         case 'P': variant = ""; break;
+         case 'G': variant = "X"; break;
+      }
+      snprintf(dev->id.name, sizeof(dev->id.name), "Apple A%d%s (G%d%c %s)",
+               dev->id.generation + 1, variant, dev->id.generation, dev->id.variant,
+               agx_get_revision_string(&dev->id));
+   }
 
    dev->memctx = memctx;
    util_sparse_array_init(&dev->bo_map, sizeof(struct agx_bo), 512);
@@ -691,12 +868,12 @@ agx_create_command_queue(struct agx_device *dev)
 }
 
 void
-agx_submit_cmdbuf(struct agx_device *dev, unsigned cmdbuf, unsigned mappings, uint64_t scalar)
+agx_submit_cmdbuf(struct agx_device *dev, struct agx_bo *cmdbuf, unsigned mappings, uint64_t scalar)
 {
 #if __APPLE__
    struct agx_submit_cmdbuf_req req = {
       .count = 1,
-      .command_buffer_shmem_id = cmdbuf,
+      .command_buffer_shmem_id = cmdbuf->handle,
       .segment_list_shmem_id = mappings,
       .notify_1 = 0xABCD,
       .notify_2 = 0x1234,
@@ -709,6 +886,18 @@ agx_submit_cmdbuf(struct agx_device *dev, unsigned cmdbuf, unsigned mappings, ui
                                            NULL, 0, NULL, 0);
    assert(ret == 0);
    return;
+#else
+   struct drm_asahi_submit submit = {
+      .cmdbuf = (uintptr_t) cmdbuf->ptr.cpu
+   };
+
+   int ret = drmIoctl(dev->fd, DRM_IOCTL_ASAHI_SUBMIT, &submit);
+   if (ret) {
+      fprintf(stderr, "DRM_IOCTL_ASAHI_SUBMIT failed: %m\n");
+      assert(0);
+   }
+
+   /* TODO: synchronization */
 #endif
 }
 
@@ -747,4 +936,19 @@ agx_wait_queue(struct agx_command_queue queue)
       }
    }
 #endif
+}
+
+const char *
+agx_get_revision_string(const struct agx_device_id *id)
+{
+   switch (id->revision) {
+      case 0x00: return "A0";
+      case 0x01: return "A1";
+      case 0x10: return "B0";
+      case 0x11: return "B1";
+      case 0x20: return "C0";
+      case 0x21: return "C1";
+   }
+
+   return "Unknown";
 }

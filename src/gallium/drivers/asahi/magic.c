@@ -73,8 +73,10 @@ asahi_size_attachments(struct pipe_framebuffer_state *framebuffer)
 {
    size_t sum = 0;
 
-   for (unsigned i = 0; i < framebuffer->nr_cbufs; ++i)
-      sum += asahi_size_surface(framebuffer->cbufs[i]);
+   for (unsigned i = 0; i < framebuffer->nr_cbufs; ++i) {
+      if (framebuffer->cbufs[i])
+         sum += asahi_size_surface(framebuffer->cbufs[i]);
+   }
 
    if (framebuffer->zsbuf)
       sum += asahi_size_surface(framebuffer->zsbuf);
@@ -127,6 +129,9 @@ asahi_pack_iogpu_attachments(void *out, struct pipe_framebuffer_state *framebuff
    unsigned nr = 0;
 
    for (unsigned i = 0; i < framebuffer->nr_cbufs; ++i) {
+      if (!framebuffer->cbufs[i])
+         continue;
+
       asahi_pack_iogpu_attachment(attachments + (nr++),
                                   agx_resource(framebuffer->cbufs[i]->texture),
                                   total_attachment_size);
@@ -148,6 +153,42 @@ asahi_pack_iogpu_attachments(void *out, struct pipe_framebuffer_state *framebuff
    return nr;
 }
 
+/* A sample position as passed to the kernel */
+struct sample_position {
+   uint8_t x, y;
+};
+
+#define SAMPLE(x_signed, y_signed) { \
+   .x = x_signed + 8, \
+   .y = y_signed + 8, \
+}
+
+/* Standard sample positions from
+ * https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_standard_multisample_quality_levels
+ */
+struct sample_position default_sample_positions[][4] = {
+   [1] = { SAMPLE(0, 0) },
+   [2] = { SAMPLE(4, 4), SAMPLE(-4, -4) },
+   [4] = {
+      SAMPLE(-2, -6),
+      SAMPLE(6, -2),
+      SAMPLE(-6, 2),
+      SAMPLE(2, 6)
+   }
+};
+
+static uint8_t
+default_sample_position(uint8_t nr_samples, uint8_t sample_id,
+                        uint8_t component)
+{
+   assert(nr_samples == 1 || nr_samples == 2 || nr_samples == 4);
+   assert(sample_id < 4);
+   assert(component < 2);
+
+   return component ? default_sample_positions[nr_samples][sample_id].y
+                    : default_sample_positions[nr_samples][sample_id].x;
+}
+
 unsigned
 demo_cmdbuf(uint64_t *buf, size_t size,
             struct agx_pool *pool,
@@ -163,7 +204,8 @@ demo_cmdbuf(uint64_t *buf, size_t size,
             bool clear_pipeline_textures,
             unsigned clear_buffers,
             double clear_depth,
-            unsigned clear_stencil)
+            unsigned clear_stencil,
+            struct agx_tilebuffer_layout *tib)
 {
    bool should_clear_depth = clear_buffers & PIPE_CLEAR_DEPTH;
    bool should_clear_stencil = clear_buffers & PIPE_CLEAR_STENCIL;
@@ -171,9 +213,13 @@ demo_cmdbuf(uint64_t *buf, size_t size,
    uint32_t *map = (uint32_t *) buf;
    memset(map, 0, 518 * 4);
 
-   uint64_t deflake_buffer = demo_zero(pool, 0x7e0);
-   uint64_t deflake_1 = deflake_buffer + 0x2a0;
-   uint64_t deflake_2 = deflake_buffer + 0x20;
+//    uint64_t deflake_buffer = demo_zero(pool, 0x7e0);
+//    uint64_t deflake_1 = deflake_buffer + 0x2a0;
+//    uint64_t deflake_2 = deflake_buffer + 0x20;
+
+   uint64_t deflake_buffer = demo_zero(pool, 0xc000);
+   uint64_t deflake_1 = deflake_buffer + 0x4000;
+   uint64_t deflake_2 = deflake_buffer + 0x8000;
 
    uint64_t unk_buffer_2 = demo_zero(pool, 0x8000);
 
@@ -297,13 +343,31 @@ demo_cmdbuf(uint64_t *buf, size_t size,
       cfg.partial_store_pipeline_bind = 0x12;
       cfg.partial_store_pipeline = pipeline_store;
 
-      cfg.depth_buffer_3 = depth_buffer;
-      cfg.stencil_buffer_3 = stencil_buffer;
       cfg.encoder_id = encoder_id;
       cfg.unknown_buffer = demo_unk6(pool);
       cfg.width_2 = framebuffer->width;
       cfg.height_2 = framebuffer->height;
       cfg.unk_352 = clear_pipeline_textures ? 0x0 : 0x1;
+
+      cfg.sample_count = tib->nr_samples;
+      cfg.sample_0_x = default_sample_position(tib->nr_samples, 0, 0);
+      cfg.sample_0_y = default_sample_position(tib->nr_samples, 0, 1);
+      cfg.sample_1_x = default_sample_position(tib->nr_samples, 1, 0);
+      cfg.sample_1_y = default_sample_position(tib->nr_samples, 1, 1);
+      cfg.sample_2_x = default_sample_position(tib->nr_samples, 2, 0);
+      cfg.sample_2_y = default_sample_position(tib->nr_samples, 2, 1);
+      cfg.sample_3_x = default_sample_position(tib->nr_samples, 3, 0);
+      cfg.sample_3_y = default_sample_position(tib->nr_samples, 3, 1);
+      cfg.tile_width = tib->tile_size.width;
+      cfg.tile_height = tib->tile_size.height;
+      cfg.unk_212 = 4 * tib->nr_samples /* TODO */;
+
+      cfg.unk_490 = 8; // XXX: how to calculate
+#if 0
+      cfg.unk_490 =
+         util_next_power_of_two(ALIGN_POT(tib->sample_size_B, 8)) * (32 * 32) /
+         cfg.tile_width * cfg.tile_height;
+#endif
    }
 
    unsigned offset_unk = (484 * 4);
