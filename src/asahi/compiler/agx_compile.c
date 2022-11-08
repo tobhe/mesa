@@ -1869,9 +1869,9 @@ agx_preprocess_nir(nir_shader *nir)
        * hardware limitation. The resulting code (with an extra f2f16 at the end
        * if needed) matches what Metal produces.
        */
-      NIR_PASS_V(nir, nir_lower_mediump_io,
-            nir_var_shader_in | nir_var_shader_out,
-            ~agx_flat_varying_mask(nir), false);
+//      NIR_PASS_V(nir, nir_lower_mediump_io,
+//            nir_var_shader_in | nir_var_shader_out,
+ //           ~agx_flat_varying_mask(nir), false);
    }
 
    NIR_PASS_V(nir, agx_nir_lower_ubo);
