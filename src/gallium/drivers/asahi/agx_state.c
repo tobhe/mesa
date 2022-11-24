@@ -1029,14 +1029,24 @@ agx_bind_vertex_elements_state(struct pipe_context *pctx, void *cso)
    ctx->dirty |= AGX_DIRTY_VERTEX;
 }
 
-static uint32_t asahi_shader_key_hash(const void *key)
+static uint32_t asahi_vs_shader_key_hash(const void *key)
 {
-   return _mesa_hash_data(key, sizeof(union asahi_shader_key));
+   return _mesa_hash_data(key, sizeof(struct asahi_vs_shader_key));
 }
 
-static bool asahi_shader_key_equal(const void *a, const void *b)
+static bool asahi_vs_shader_key_equal(const void *a, const void *b)
 {
-   return memcmp(a, b, sizeof(union asahi_shader_key)) == 0;
+   return memcmp(a, b, sizeof(struct asahi_vs_shader_key)) == 0;
+}
+
+static uint32_t asahi_fs_shader_key_hash(const void *key)
+{
+   return _mesa_hash_data(key, sizeof(struct asahi_fs_shader_key));
+}
+
+static bool asahi_fs_shader_key_equal(const void *a, const void *b)
+{
+   return memcmp(a, b, sizeof(struct asahi_fs_shader_key)) == 0;
 }
 
 static unsigned
@@ -1255,7 +1265,13 @@ agx_create_shader_state(struct pipe_context *pctx,
       so->nir = tgsi_to_nir(cso->tokens, pctx->screen, false);
    }
 
-   so->variants = _mesa_hash_table_create(NULL, asahi_shader_key_hash, asahi_shader_key_equal);
+   if (so->nir->info.stage == MESA_SHADER_VERTEX) {
+      so->variants = _mesa_hash_table_create(NULL, asahi_vs_shader_key_hash,
+                                             asahi_vs_shader_key_equal);
+   } else {
+      so->variants = _mesa_hash_table_create(NULL, asahi_fs_shader_key_hash,
+                                             asahi_fs_shader_key_equal);
+   }
 
    /* For shader-db, precompile a shader with a default key. This could be
     * improved but hopefully this is acceptable for now.
