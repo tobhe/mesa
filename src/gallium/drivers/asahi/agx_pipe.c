@@ -683,7 +683,9 @@ agx_prepare_for_map(struct agx_context *ctx,
 
    if (usage & PIPE_MAP_WRITE) {
       /* Try to shadow the resource to avoid a flush */
-      if ((usage & PIPE_MAP_DISCARD_WHOLE_RESOURCE) && agx_shadow(ctx, rsrc))
+      if ((usage & PIPE_MAP_DISCARD_WHOLE_RESOURCE) &&
+          agx_any_batch_uses_resource(ctx, rsrc) &&
+          agx_shadow(ctx, rsrc))
          return;
 
       /* Otherwise, we need to flush */
