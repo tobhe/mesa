@@ -234,6 +234,13 @@ ail_make_miptree(struct ail_layout *layout)
       assert(layout->sample_count_sa >= 1 && "Invalid samplt count");
    }
 
+   /* Hardware strides are based on the max number of levels, so always
+    * allocate them all. */
+   if (layout->levels > 1) {
+      layout->levels = util_logbase2(MAX2(layout->width_px,
+                                          layout->height_px)) + 1;
+   }
+
    assert(util_format_get_blockdepth(layout->format) == 1 &&
          "Deep formats unsupported");
 
