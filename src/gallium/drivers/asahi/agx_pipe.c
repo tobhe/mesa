@@ -782,7 +782,7 @@ agx_transfer_map(struct pipe_context *pctx,
 
       assert(transfer->staging.rsrc != NULL);
 
-      if ((usage & PIPE_MAP_READ) && BITSET_TEST(rsrc->data_valid, level)) {
+      if ((usage & PIPE_MAP_READ) && agx_resource_valid(rsrc, level)) {
             agx_blit_to_staging(pctx, transfer);
             agx_flush_writer(ctx, staging, "GPU read staging blit");
       }
@@ -803,7 +803,7 @@ agx_transfer_map(struct pipe_context *pctx,
 
       transfer->map = calloc(transfer->base.layer_stride, box->depth);
 
-      if ((usage & PIPE_MAP_READ) && BITSET_TEST(rsrc->data_valid, level)) {
+      if ((usage & PIPE_MAP_READ) && agx_resource_valid(rsrc, level)) {
          for (unsigned z = 0; z < box->depth; ++z) {
             uint8_t *map = agx_map_texture_cpu(rsrc, level, box->z + z);
             uint8_t *dst = (uint8_t *) transfer->map +
@@ -1027,7 +1027,7 @@ agx_cmdbuf(uint64_t *buf, size_t size,
          }
 
          if (zres) {
-            bool valid = BITSET_TEST(zres->data_valid, level);
+            bool valid = agx_resource_valid(zres, level);
             bool clear = (batch->clear & PIPE_CLEAR_DEPTH);
 
             zls_control.z_store_enable = (batch->resolve & PIPE_CLEAR_DEPTH);
@@ -1052,7 +1052,7 @@ agx_cmdbuf(uint64_t *buf, size_t size,
          }
 
          if (sres) {
-            bool valid = BITSET_TEST(sres->data_valid, zsbuf->u.tex.level);
+            bool valid = agx_resource_valid(sres, zsbuf->u.tex.level);
             bool clear = (batch->clear & PIPE_CLEAR_STENCIL);
 
             zls_control.s_store_enable = (batch->resolve & PIPE_CLEAR_STENCIL);
