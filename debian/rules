@@ -1,0 +1,123 @@
+#!/usr/bin/make -f
+# debian/rules for the Debian mesa package
+# Copyright © 2006 Thierry Reding <thierry@gilfi.de>
+
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+include /usr/share/dpkg/pkg-info.mk
+
+DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+DEB_HOST_ARCH      ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
+DEB_HOST_ARCH_OS   ?= $(shell dpkg-architecture -qDEB_HOST_ARCH_OS)
+DEB_HOST_ARCH_CPU  ?= $(shell dpkg-architecture -qDEB_HOST_ARCH_CPU)
+
+# for finding the correct llvm-config when meson doesn't know about it yet
+export PATH:=/usr/lib/llvm-15/bin/:$(PATH)
+
+export DEB_BUILD_MAINT_OPTIONS=optimize=-lto
+
+buildflags = \
+	$(shell DEB_CFLAGS_MAINT_APPEND=-Wall DEB_CXXFLAGS_MAINT_APPEND=-Wall dpkg-buildflags --export=configure)
+
+confflags += \
+	-D b_ndebug=true \
+	-D b_lto=false \
+	-D platforms=x11,wayland \
+	-D gallium-drivers=swrast,virgl,kmsro,asahi \
+	-D vulkan-drivers=swrast \
+	-D vulkan-layers= \
+	-D dri3=enabled \
+	-D egl=enabled \
+	-D gallium-extra-hud=true \
+	-D gallium-opencl=disabled \
+	-D gallium-rusticl=false \
+	-D gallium-va=disabled \
+	-D gallium-vdpau=disabled \
+	-D gallium-xa=disabled \
+	-D gbm=enabled \
+	-D gles1=disabled \
+	-D gles2=enabled \
+	-D glvnd=true \
+	-D glx=dri \
+	-D libunwind=disabled \
+	-D llvm=enabled \
+	-D lmsensors=enabled \
+	-D osmesa=true \
+	-D shared-glapi=enabled \
+	-D microsoft-clc=disabled \
+	-D valgrind=enabled
+
+override_dh_clean:
+	rm -rf .pc
+	rm -rf build
+	rm -rf configure bin/config.guess bin/config.sub config.h.in
+	rm -rf $$(find -name Makefile.in)
+	rm -rf bin/install-sh bin/ltmain.sh
+	for file in debian/*.in; do rm -f $${file%%.in}; done
+	find -name '*.pyc' -delete
+	find -name '__pycache__' -delete
+	dh_clean
+
+override_dh_auto_configure:
+	$(buildflags) dh_auto_configure -- \
+		$(confflags)
+
+override_dh_auto_install:
+	dh_auto_install
+	for file in debian/*.in; \
+	do \
+		sed -e"s,\$${DEB_HOST_MULTIARCH},$(DEB_HOST_MULTIARCH),g" \
+			$${file} > $${file%%.in}; \
+	done
+
+# some tests are expected to fail for now, drop this when upstream has
+# better cross-build testing in place and expected failures fixed
+override_dh_auto_test:
+	-dh_auto_test
+
+allpkg = $(shell dh_listpackages -a)
+
+override_dh_installchangelogs:
+	dh_installchangelogs -a
+	dh_installchangelogs -pmesa-common-dev
+
+override_dh_install:
+	# purge .la files
+	find debian/tmp/ -name '*.la' -exec rm '{}' ';'
+
+	# Get rid of some files which aren't installed. Do not
+	# use -f to ensure we notice disappearing files:
+	rm debian/tmp/usr/lib/*/libglapi.so
+	rm debian/tmp/usr/lib/*/libEGL_mesa.so
+	rm debian/tmp/usr/lib/*/libGLX_mesa.so
+
+	# Copy the hardlinked *_dri.so correctly.
+	install -m755 -d debian/libgl1-mesa-dri/usr/lib/${DEB_HOST_MULTIARCH}/dri/
+	mv debian/tmp/usr/lib/${DEB_HOST_MULTIARCH}/dri/*_dri.so \
+	   debian/libgl1-mesa-dri/usr/lib/${DEB_HOST_MULTIARCH}/dri/
+
+	dh_install -a
+
+	# Install bug control and script:
+	set -e; for p in $(allpkg); do \
+		install -d debian/$$p/usr/share/bug/$$p && \
+		install -m 644 debian/local/control debian/$$p/usr/share/bug/$$p && \
+		install -m 755 debian/local/script  debian/$$p/usr/share/bug/$$p; \
+	done
+
+override_dh_missing:
+	dh_missing --fail-missing
+
+override_dh_makeshlibs:
+	dh_makeshlibs -a -- -c4
+
+%:
+	dh $@ --with quilt \
+		--builddirectory=build/ \
+		--buildsystem=meson
+
+# For maintainer use only, generate a tarball:
+gentarball:
+	git archive --format=tar upstream-experimental --prefix=$(DEB_SOURCE)-$(DEB_VERSION_UPSTREAM)/ \
+		| gzip -9 > ../$(DEB_SOURCE)_$(DEB_VERSION_UPSTREAM).orig.tar.gz

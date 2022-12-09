@@ -1,0 +1,5 @@
+mesa-asahi-edge (23.0.0-1asahi0~pre20221205) kinetic; urgency=medium
+
+  * Import asahi upstream for AGX
+
+ -- Tobias Heider <me@tobhe.de>  Thu, 08 Dec 2022 14:27:18 +0100
