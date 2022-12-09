@@ -957,7 +957,7 @@ asahi_add_attachment(struct drm_asahi_cmdbuf *c,
 }
 
 static void
-agx_cmdbuf(uint64_t *buf, size_t size,
+agx_cmdbuf(struct drm_asahi_cmdbuf *c,
            struct agx_pool *pool,
            struct agx_batch *batch,
            struct pipe_framebuffer_state *framebuffer,
@@ -976,8 +976,6 @@ agx_cmdbuf(uint64_t *buf, size_t size,
            unsigned clear_stencil,
            struct agx_tilebuffer_layout *tib)
 {
-   struct drm_asahi_cmdbuf *c = (void *)buf;
-
    memset(c, 0, sizeof(*c));
 
    c->encoder_ptr = encoder_ptr;
@@ -1302,13 +1300,15 @@ agx_flush_batch(struct agx_context *ctx, struct agx_batch *batch)
                 cmdbuf_id, encoder_id, cmdbuf_size);
 
    free(handles);
+
+   agx_submit_cmdbuf(dev, &dev->cmdbuf, dev->memmap.handle, dev->queue.id);
 #else
    unsigned cmd_ta_id = agx_get_global_id(dev);
    unsigned cmd_3d_id = agx_get_global_id(dev);
    unsigned encoder_id = agx_get_global_id(dev);
 
-   agx_cmdbuf(dev->cmdbuf.ptr.cpu,
-               dev->cmdbuf.size,
+   struct drm_asahi_cmdbuf cmdbuf;
+   agx_cmdbuf(&cmdbuf,
                &batch->pool,
                batch,
                &batch->key,
@@ -1327,9 +1327,8 @@ agx_flush_batch(struct agx_context *ctx, struct agx_batch *batch)
                batch->clear_stencil,
                &batch->tilebuffer_layout);
 
+   agx_submit_cmdbuf(dev, &cmdbuf);
 #endif
-
-   agx_submit_cmdbuf(dev, &dev->cmdbuf, dev->memmap.handle, dev->queue.id);
 
    agx_wait_queue(dev->queue);
 
@@ -1337,7 +1336,7 @@ agx_flush_batch(struct agx_context *ctx, struct agx_batch *batch)
 #if __APPLE__
       agxdecode_cmdstream(dev->cmdbuf.handle, dev->memmap.handle, true);
 #else
-      agxdecode_dri_cmdstream(dev->cmdbuf.handle, dev->memmap.handle, true);
+      agxdecode_dri_cmdstream(&cmdbuf, true);
 #endif
       agxdecode_next_frame();
    }

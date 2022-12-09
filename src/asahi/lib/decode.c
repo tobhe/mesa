@@ -637,20 +637,9 @@ agxdecode_gfx(uint32_t *cmdbuf, uint64_t encoder, bool verbose)
 }
 
 void
-agxdecode_dri_cmdstream(unsigned cmdbuf_handle, unsigned map_handle, bool verbose)
+agxdecode_dri_cmdstream(struct drm_asahi_cmdbuf *c, bool verbose)
 {
    agxdecode_dump_file_open();
-
-   struct agx_bo *cmdbuf = agxdecode_find_handle(cmdbuf_handle, AGX_ALLOC_CMDBUF);
-   struct agx_bo *map = agxdecode_find_handle(map_handle, AGX_ALLOC_MEMMAP);
-
-   assert(cmdbuf != NULL && "nonexistant command buffer");
-   assert(map != NULL && "nonexistant mapping");
-
-   /* Before decoding anything, validate the map. Set bo->mapped fields */
-   agxdecode_decode_segment_list(map->ptr.cpu);
-
-   struct drm_asahi_cmdbuf *c = (void *)cmdbuf->ptr.cpu;
 
    DUMP_FIELD(c, "%llx", flags);
    DUMP_FIELD(c, "0x%llx", encoder_ptr);

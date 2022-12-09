@@ -80,7 +80,9 @@ struct agx_device {
 
    /* XXX What to bind to? I don't understand the IOGPU UABI */
    struct agx_command_queue queue;
+#if __APPLE__
    struct agx_bo cmdbuf, memmap;
+#endif
    uint64_t next_global_id, last_global_id;
 
    /* Device handle */
@@ -127,11 +129,13 @@ agx_lookup_bo(struct agx_device *dev, uint32_t handle)
    return util_sparse_array_get(&dev->bo_map, handle);
 }
 
+#ifdef __APPLE__
 struct agx_bo
 agx_shmem_alloc(struct agx_device *dev, size_t size, bool cmdbuf);
 
 void
 agx_shmem_free(struct agx_device *dev, unsigned handle);
+#endif
 
 uint64_t
 agx_get_global_id(struct agx_device *dev);
@@ -139,8 +143,13 @@ agx_get_global_id(struct agx_device *dev);
 struct agx_command_queue
 agx_create_command_queue(struct agx_device *dev);
 
+#if __APPLE__
 void
 agx_submit_cmdbuf(struct agx_device *dev, struct agx_bo *cmdbuf, unsigned mappings, uint64_t scalar);
+#else
+int
+agx_submit_cmdbuf(struct agx_device *dev, struct drm_asahi_cmdbuf *c);
+#endif
 
 void
 agx_wait_queue(struct agx_command_queue queue);

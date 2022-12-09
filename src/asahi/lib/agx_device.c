@@ -56,10 +56,10 @@ agx_bo_free(struct agx_device *dev, struct agx_bo *bo)
    memset(bo, 0, sizeof(*bo));
 }
 
+#if __APPLE__
 void
 agx_shmem_free(struct agx_device *dev, unsigned handle)
 {
-#if __APPLE__
 	const uint64_t input = handle;
    kern_return_t ret = IOConnectCallScalarMethod(dev->fd,
                        AGX_SELECTOR_FREE_SHMEM,
@@ -67,8 +67,6 @@ agx_shmem_free(struct agx_device *dev, unsigned handle)
 
    if (ret)
       fprintf(stderr, "error freeing shmem: %u\n", ret);
-#else
-#endif
 }
 
 struct agx_bo
@@ -76,7 +74,6 @@ agx_shmem_alloc(struct agx_device *dev, size_t size, bool cmdbuf)
 {
    struct agx_bo bo;
 
-#if __APPLE__
    struct agx_create_shmem_resp out = {};
    size_t out_sz = sizeof(out);
 
@@ -100,23 +97,13 @@ agx_shmem_alloc(struct agx_device *dev, size_t size, bool cmdbuf)
       .ptr.cpu = out.map,
       .size = out.size,
    };
-#else
-   /* TODO: This doesn't make any sense on Linux... Lina send help! */
-   static int fake_shmem_handle = 0;
-
-   bo = (struct agx_bo) {
-      .type = cmdbuf ? AGX_ALLOC_CMDBUF : AGX_ALLOC_MEMMAP,
-      .ptr.cpu = calloc(1, size),
-      .size = size,
-      .handle = fake_shmem_handle++,
-   };
-#endif
 
    if (dev->debug & AGX_DBG_TRACE)
       agxdecode_track_alloc(&bo);
 
    return bo;
 }
+#endif
 
 #ifndef __APPLE__
 void
@@ -749,8 +736,10 @@ agx_open_device(void *memctx, struct agx_device *dev)
       list_inithead(&dev->bo_cache.buckets[i]);
 
    dev->queue = agx_create_command_queue(dev);
+#if __APPLE__
    dev->cmdbuf = agx_shmem_alloc(dev, 0x4000, true); // length becomes kernelCommandDataSize
    dev->memmap = agx_shmem_alloc(dev, 0x10000, false);
+#endif
    agx_get_global_ids(dev);
 
    return true;
@@ -867,10 +856,10 @@ agx_create_command_queue(struct agx_device *dev)
 #endif
 }
 
+#if __APPLE__
 void
 agx_submit_cmdbuf(struct agx_device *dev, struct agx_bo *cmdbuf, unsigned mappings, uint64_t scalar)
 {
-#if __APPLE__
    struct agx_submit_cmdbuf_req req = {
       .count = 1,
       .command_buffer_shmem_id = cmdbuf->handle,
@@ -886,20 +875,26 @@ agx_submit_cmdbuf(struct agx_device *dev, struct agx_bo *cmdbuf, unsigned mappin
                                            NULL, 0, NULL, 0);
    assert(ret == 0);
    return;
+}
 #else
+int
+agx_submit_cmdbuf(struct agx_device *dev, struct drm_asahi_cmdbuf *c)
+{
    struct drm_asahi_submit submit = {
-      .cmdbuf = (uintptr_t) cmdbuf->ptr.cpu
+      .cmdbuf = (uintptr_t) c
    };
 
    int ret = drmIoctl(dev->fd, DRM_IOCTL_ASAHI_SUBMIT, &submit);
    if (ret) {
-      fprintf(stderr, "DRM_IOCTL_ASAHI_SUBMIT failed: %m\n");
+      fprintf(stderr, "DRM_IOCTL_ASAHI_SUBMIT failed: %m (%dx%d tile %dx%d layers %d samples %d)\n",
+              c->fb_width, c->fb_height, c->utile_width, c->utile_height,
+              c->layers, c->samples);
       assert(0);
    }
 
-   /* TODO: synchronization */
-#endif
+   return ret;
 }
+#endif
 
 /*
  * Wait for a frame to finish rendering.
