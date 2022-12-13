@@ -52,12 +52,13 @@ ifeq ($(DEB_HOST_ARCH_OS), hurd)
 	confflags_DIRECT_RENDERING = -Dglx-direct=false
 	confflags_GBM = -Dgbm=disabled
 else
-	GALLIUM_DRIVERS += r300 r600 asahi kmsro
+	GALLIUM_DRIVERS += r300 r600 kmsro
 
-	confflags_DIRECT_RENDERING = -Dglx-direct=true
+	# confflags_DIRECT_RENDERING = -Dglx-direct=true
+	confflags_DIRECT_RENDERING = -Dglx=dri
 	confflags_GBM = -Dgbm=enabled
 	confflags_GALLIUM += -Dgallium-extra-hud=true
-	confflags_GALLIUM += -Dgallium-vdpau=enabled
+	confflags_GALLIUM += -Dgallium-vdpau=disabled
 	confflags_GALLIUM += -Dlmsensors=enabled
 
   # radv/lavapipe needs LLVM and the Vulkan loader, so only build on the subset of
@@ -132,8 +133,7 @@ else
   endif
 
   ifeq (,$(filter pkg.mesa.nolibva,$(DEB_BUILD_PROFILES)))
-	confflags_GALLIUM += -Dgallium-va=enabled
-	confflags_GALLIUM += -Dvideo-codecs="vc1dec, h264dec, h264enc, h265dec, h265enc"
+	confflags_GALLIUM += -Dgallium-va=disabled
   endif
 endif
 
@@ -158,8 +158,8 @@ confflags_GALLIUM += -Dgallium-drivers="[$(GALLIUM_DRIVERS_LIST)]"
 confflags += \
 	-Ddri-drivers-path=/usr/lib/$(DEB_HOST_MULTIARCH)/dri \
 	-Ddri-search-path='/usr/lib/$(DEB_HOST_MULTIARCH)/dri:\$$$${ORIGIN}/dri:/usr/lib/dri' \
-	-Dvulkan-drivers="[$(VULKAN_DRIVERS_LIST)]" \
-	-Dvulkan-layers="[$(VULKAN_LAYERS_LIST)]" \
+	-Dvulkan-drivers="swrast" \
+	-Dvulkan-layers= \
 	-Dglvnd=true \
 	-Dshared-glapi=enabled \
 	-Dgallium-omx=disabled \
@@ -167,8 +167,6 @@ confflags += \
 	-Dbuild-tests=true \
         -Dlibunwind=disabled \
         -Degl=enabled \
-        -Dgallium-va=disabled \
-        -Dgallium-vdpau=disabled \
         -Dgallium-xa=disabled \
         -Dglx=dri \
         -Dmicrosoft-clc=disabled \
@@ -230,20 +228,6 @@ override_dh_install:
 	install -m755 -d debian/libgl1-mesa-dri/usr/lib/${DEB_HOST_MULTIARCH}/dri/
 	mv debian/tmp/usr/lib/${DEB_HOST_MULTIARCH}/dri/*_dri.so \
 	   debian/libgl1-mesa-dri/usr/lib/${DEB_HOST_MULTIARCH}/dri/
-
-  ifneq ($(DEB_HOST_ARCH_OS), hurd)
-	# Copy the hardlinked vdpau drivers correctly.
-	install -m755 -d debian/mesa-vdpau-drivers/usr/lib/${DEB_HOST_MULTIARCH}/vdpau/
-	mv debian/tmp/usr/lib/${DEB_HOST_MULTIARCH}/vdpau/libvdpau*.so* \
-	   debian/mesa-vdpau-drivers/usr/lib/${DEB_HOST_MULTIARCH}/vdpau/
-
-    ifeq (,$(filter pkg.mesa.nolibva,$(DEB_BUILD_PROFILES)))
-	# Copy the hardlinked va drivers correctly.
-	install -m755 -d debian/mesa-va-drivers/usr/lib/${DEB_HOST_MULTIARCH}/dri/
-	mv debian/tmp/usr/lib/${DEB_HOST_MULTIARCH}/dri/*_drv_video.so \
-	   debian/mesa-va-drivers/usr/lib/${DEB_HOST_MULTIARCH}/dri/
-    endif
-  endif
 
 	dh_install -a
 
