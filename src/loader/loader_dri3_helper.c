@@ -298,11 +298,11 @@ dri3_update_max_num_back(struct loader_dri3_drawable *draw)
       break;
 
    default:
-      /* On transition from flips to copies, start with a single buffer again,
-       * a second one will be allocated if needed
+      /* On transition from flips to copies, limit the maximum number of back
+       * buffers to 2.
        */
-      if (draw->max_num_back != 2)
-         draw->cur_num_back = 1;
+      if (draw->max_num_back != 2 && draw->cur_num_back > 2)
+         draw->cur_num_back = 2;
 
       draw->max_num_back = 2;
    }
