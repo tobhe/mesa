@@ -47,7 +47,8 @@ agx_bo_free(struct agx_device *dev, struct agx_bo *bo)
    if (ret)
       fprintf(stderr, "error freeing BO mem: %u\n", ret);
 #else
-   munmap(bo->ptr.cpu, bo->size);
+   if (bo->ptr.cpu)
+      munmap(bo->ptr.cpu, bo->size);
    struct drm_gem_close args = { .handle = handle };
    drmIoctl(dev->fd, DRM_IOCTL_GEM_CLOSE, &args);
 #endif
