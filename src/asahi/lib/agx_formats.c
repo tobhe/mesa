@@ -111,7 +111,7 @@ const struct agx_pixel_format_entry agx_pixel_format[PIPE_FORMAT_COUNT] = {
    AGX_FMT(R32G32_SINT,             R32G32,        SINT,   T, I32),
    AGX_FMT(R32G32B32A32_SINT,       R32G32B32A32,  SINT,   T, I32),
 
-   AGX_FMT(Z16_UNORM,               R16,           UNORM,  F, _),
+//   AGX_FMT(Z16_UNORM,               R16,           UNORM,  F, _),
    AGX_FMT(Z32_FLOAT,               R32,           FLOAT,  F, _),
    AGX_FMT(Z32_FLOAT_S8X24_UINT,    R32,           FLOAT,  F, _),
    AGX_FMT(S8_UINT,                 R8,            UINT,   F, _),
