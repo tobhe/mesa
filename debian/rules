@@ -52,10 +52,9 @@ ifeq ($(DEB_HOST_ARCH_OS), hurd)
 	confflags_DIRECT_RENDERING = -Dglx-direct=false
 	confflags_GBM = -Dgbm=disabled
 else
-	GALLIUM_DRIVERS += r300 r600 kmsro
+	GALLIUM_DRIVERS += r300 r600
 
-	# confflags_DIRECT_RENDERING = -Dglx-direct=true
-	confflags_DIRECT_RENDERING =
+	confflags_DIRECT_RENDERING = -Dglx-direct=true
 	confflags_GBM = -Dgbm=enabled
 	confflags_GALLIUM += -Dgallium-extra-hud=true
 	confflags_GALLIUM += -Dgallium-vdpau=disabled
@@ -70,7 +69,7 @@ else
   ifeq ($(DEB_HOST_ARCH_OS), linux)
 	confflags_DRI3 = -Ddri3=enabled
 	# Gallium drivers which require kernel support, not yet ported to non-Linux
-	GALLIUM_DRIVERS += nouveau virgl
+	GALLIUM_DRIVERS += nouveau virgl kmsro
 
 	# Freedreno requires arm in addition
 	ifneq (,$(filter arm arm64,$(DEB_HOST_ARCH_CPU)))
@@ -127,9 +126,6 @@ else
 	VULKAN_LAYERS += device-select intel-nullhw overlay
   endif
 
-  ifeq (,$(filter pkg.mesa.nolibva,$(DEB_BUILD_PROFILES)))
-	confflags_GALLIUM += -Dgallium-va=disabled
-  endif
 endif
 
 ifeq ($(DEB_HOST_ARCH), i386)
@@ -148,9 +144,7 @@ VULKAN_LAYERS_LIST := $(subst $(space),$(comma),$(VULKAN_LAYERS))
 
 confflags_EGL = -Dplatforms="$(EGL_PLATFORMS)"
 confflags_GLES = -Dgles1=disabled -Dgles2=enabled
-confflags_GALLIUM += -Dgallium-va=disabled
-confflags_GALLIUM += -Dgallium-drivers="[$(GALLIUM_DRIVERS_LIST)]"
-confflags_GALLIUM = -Dgallium-drivers="['swrast', 'virgl', 'kmsro', 'asahi']"
+confflags_GALLIUM += -Dgallium-drivers="['swrast', 'virgl', 'kmsro', 'asahi']"
 
 confflags += \
 	-Ddri-drivers-path=/usr/lib/$(DEB_HOST_MULTIARCH)/dri \
@@ -162,10 +156,6 @@ confflags += \
 	-Dgallium-omx=disabled \
 	-Db_ndebug=true \
 	-Dbuild-tests=true \
-        -Dlibunwind=disabled \
-        -Degl=enabled \
-        -Dgallium-xa=disabled \
-        -Dmicrosoft-clc=disabled \
 	$(confflags_DIRECT_RENDERING) \
 	$(confflags_GBM) \
 	$(confflags_DRI3) \

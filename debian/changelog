@@ -1,8 +1,9 @@
-mesa (23.0.0-1asahi2~pre20221205.test10) kinetic; urgency=medium
+mesa (23.0.0-1asahi2~pre20221214) kinetic; urgency=medium
 
-  * Test
+  * Update to newest upstream mesa version
+  * Tune config
 
- -- Tobias Heider <me@tobhe.de>  Mon, 12 Dec 2022 01:18:45 +0100
+ -- Tobias Heider <me@tobhe.de>  Wed, 14 Dec 2022 16:28:25 +0100
 
 mesa (23.0.0-1asahi2~pre20221205) kinetic; urgency=medium
 
