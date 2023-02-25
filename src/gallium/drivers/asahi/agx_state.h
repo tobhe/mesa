@@ -25,6 +25,7 @@
 #ifndef AGX_STATE_H
 #define AGX_STATE_H
 
+#include <xf86drm.h>
 #include "asahi/compiler/agx_compile.h"
 #include "asahi/layout/layout.h"
 #include "asahi/lib/agx_bo.h"
@@ -34,6 +35,7 @@
 #include "asahi/lib/agx_tilebuffer.h"
 #include "asahi/lib/pool.h"
 #include "compiler/nir/nir_lower_blend.h"
+#include "drm-uapi/asahi_drm.h"
 #include "gallium/auxiliary/util/u_blitter.h"
 #include "gallium/include/pipe/p_context.h"
 #include "gallium/include/pipe/p_screen.h"
@@ -173,6 +175,8 @@ struct agx_stage {
 };
 
 union agx_batch_result {
+   struct drm_asahi_result_render render;
+   struct drm_asahi_result_compute compute;
 };
 
 struct agx_batch {

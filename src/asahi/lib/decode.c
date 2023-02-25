@@ -32,6 +32,7 @@
 #include <sys/mman.h>
 #include <agx_pack.h>
 
+#include "drm-uapi/asahi_drm.h"
 #include "decode.h"
 #include "hexdump.h"
 #ifdef __APPLE__
@@ -82,12 +83,14 @@ agxdecode_find_mapped_gpu_mem_containing(uint64_t addr)
       assert(ro_mapping_count < MAX_MAPPINGS);
    }
 
+#if __APPLE__
    if (mem && !mem->mapped) {
       fprintf(stderr,
               "[ERROR] access to memory not mapped (GPU %" PRIx64
               ", handle %u)\n",
               mem->ptr.gpu, mem->handle);
    }
+#endif
 
    return mem;
 }
@@ -265,6 +268,11 @@ agxdecode_map_read_write(void)
    {                                                                           \
       agx_unpack(agxdecode_dump_stream, cl, T, temp);                          \
       DUMP_UNPACKED(T, temp, str "\n");                                        \
+   }
+
+#define DUMP_FIELD(struct, fmt, field)                                         \
+   {                                                                           \
+      fprintf(agxdecode_dump_stream, #field " = " fmt "\n", struct->field);    \
    }
 
 #define agxdecode_log(str) fputs(str, agxdecode_dump_stream)
@@ -729,6 +737,69 @@ agxdecode_gfx(uint32_t *cmdbuf, uint64_t encoder, bool verbose)
       agxdecode_stateful(gfx.partial_store_pipeline, "Partial store pipeline",
                          agxdecode_usc, verbose, NULL);
    }
+}
+
+void
+agxdecode_drm_cmd_render(struct drm_asahi_cmd_render *c, bool verbose)
+{
+   agxdecode_dump_file_open();
+
+   DUMP_FIELD(c, "%llx", flags);
+   DUMP_FIELD(c, "0x%llx", encoder_ptr);
+   agxdecode_stateful(c->encoder_ptr, "Encoder", agxdecode_vdm, verbose, NULL);
+   DUMP_FIELD(c, "0x%x", encoder_id);
+   DUMP_FIELD(c, "0x%x", cmd_ta_id);
+   DUMP_FIELD(c, "0x%x", cmd_3d_id);
+   DUMP_FIELD(c, "0x%x", ppp_ctrl);
+   DUMP_FIELD(c, "0x%llx", zls_ctrl);
+   DUMP_FIELD(c, "0x%llx", depth_buffer_1);
+   DUMP_FIELD(c, "0x%llx", depth_buffer_2);
+   DUMP_FIELD(c, "0x%llx", depth_buffer_3);
+   DUMP_FIELD(c, "0x%llx", stencil_buffer_1);
+   DUMP_FIELD(c, "0x%llx", stencil_buffer_2);
+   DUMP_FIELD(c, "0x%llx", stencil_buffer_3);
+   DUMP_FIELD(c, "0x%llx", scissor_array);
+   DUMP_FIELD(c, "0x%llx", depth_bias_array);
+   DUMP_FIELD(c, "%d", fb_width);
+   DUMP_FIELD(c, "%d", fb_height);
+   DUMP_FIELD(c, "0x%x", load_pipeline);
+   DUMP_FIELD(c, "0x%x", load_pipeline_bind);
+   agxdecode_stateful(c->load_pipeline & ~0x7, "Load pipeline", agxdecode_usc,
+                      verbose, NULL);
+   DUMP_FIELD(c, "0x%x", store_pipeline);
+   DUMP_FIELD(c, "0x%x", store_pipeline_bind);
+   agxdecode_stateful(c->store_pipeline & ~0x7, "Store pipeline", agxdecode_usc,
+                      verbose, NULL);
+   DUMP_FIELD(c, "0x%x", partial_reload_pipeline);
+   DUMP_FIELD(c, "0x%x", partial_reload_pipeline_bind);
+   agxdecode_stateful(c->partial_reload_pipeline & ~0x7,
+                      "Partial reload pipeline", agxdecode_usc, verbose, NULL);
+   DUMP_FIELD(c, "0x%x", partial_store_pipeline);
+   DUMP_FIELD(c, "0x%x", partial_store_pipeline_bind);
+   agxdecode_stateful(c->partial_store_pipeline & ~0x7,
+                      "Partial store pipeline", agxdecode_usc, verbose, NULL);
+
+   DUMP_FIELD(c, "0x%x", depth_dimensions);
+   DUMP_FIELD(c, "0x%x", isp_bgobjdepth);
+   DUMP_FIELD(c, "0x%x", isp_bgobjvals);
+
+   // TODO: attachments
+
+   agxdecode_map_read_write();
+}
+
+void
+agxdecode_drm_cmd_compute(struct drm_asahi_cmd_compute *c, bool verbose)
+{
+   agxdecode_dump_file_open();
+
+   DUMP_FIELD(c, "%llx", flags);
+   DUMP_FIELD(c, "0x%llx", encoder_ptr);
+   agxdecode_stateful(c->encoder_ptr, "Encoder", agxdecode_cdm, verbose, NULL);
+   DUMP_FIELD(c, "0x%x", encoder_id);
+   DUMP_FIELD(c, "0x%x", cmd_id);
+
+   agxdecode_map_read_write();
 }
 
 #ifdef __APPLE__

@@ -30,6 +30,7 @@
 #include "asahi/layout/layout.h"
 #include "asahi/lib/agx_formats.h"
 #include "asahi/lib/decode.h"
+#include "drm-uapi/asahi_drm.h"
 #include "drm-uapi/drm_fourcc.h"
 #include "frontend/sw_winsys.h"
 #include "frontend/winsys_handle.h"
@@ -55,20 +56,6 @@
 #include "agx_fence.h"
 #include "agx_public.h"
 #include "agx_state.h"
-
-/* Fake values, pending UAPI upstreaming */
-#ifndef DRM_FORMAT_MOD_LINEAR
-#define DRM_FORMAT_MOD_LINEAR 1
-#endif
-#ifndef DRM_FORMAT_MOD_INVALID
-#define DRM_FORMAT_MOD_INVALID ((1ULL << 56) - 1)
-#endif
-#ifndef DRM_FORMAT_MOD_APPLE_TWIDDLED
-#define DRM_FORMAT_MOD_APPLE_TWIDDLED (2)
-#endif
-#ifndef DRM_FORMAT_MOD_APPLE_TWIDDLED_COMPRESSED
-#define DRM_FORMAT_MOD_APPLE_TWIDDLED_COMPRESSED (3)
-#endif
 
 /* clang-format off */
 static const struct debug_named_value agx_debug_options[] = {
@@ -1002,6 +989,244 @@ agx_flush_resource(struct pipe_context *pctx, struct pipe_resource *pres)
 
 }
 
+static uint64_t
+agx_map_surface_resource(struct pipe_surface *surf, struct agx_resource *rsrc)
+{
+   return agx_map_texture_gpu(rsrc, surf->u.tex.first_layer);
+}
+
+static uint64_t
+agx_map_surface(struct pipe_surface *surf)
+{
+   return agx_map_surface_resource(surf, agx_resource(surf->texture));
+}
+
+#define MAX_ATTACHMENTS 16
+
+struct attachments {
+   struct drm_asahi_attachment list[MAX_ATTACHMENTS];
+   size_t count;
+};
+
+static void
+asahi_add_attachment(struct attachments *att, struct agx_resource *rsrc,
+                     struct pipe_surface *surf, uint32_t type)
+{
+   assert(att->count < MAX_ATTACHMENTS);
+   int idx = att->count++;
+
+   /* We don't support layered rendering yet */
+   assert(surf->u.tex.first_layer == surf->u.tex.last_layer);
+
+   att->list[idx].type = type;
+   att->list[idx].size = rsrc->bo->size;
+   att->list[idx].pointer = rsrc->bo->ptr.gpu;
+}
+
+static void
+agx_cmdbuf(struct agx_device *dev, struct drm_asahi_cmd_render *c,
+           struct attachments *att, struct agx_pool *pool,
+           struct agx_batch *batch, struct pipe_framebuffer_state *framebuffer,
+           uint64_t encoder_ptr, uint64_t encoder_id, uint64_t cmd_ta_id,
+           uint64_t cmd_3d_id, uint64_t scissor_ptr, uint64_t depth_bias_ptr,
+           uint64_t visibility_result_ptr, uint32_t pipeline_clear,
+           uint32_t pipeline_load, uint32_t pipeline_store,
+           bool clear_pipeline_textures, double clear_depth,
+           unsigned clear_stencil, struct agx_tilebuffer_layout *tib)
+{
+   memset(c, 0, sizeof(*c));
+
+   c->encoder_ptr = encoder_ptr;
+   c->encoder_id = encoder_id;
+   c->cmd_3d_id = cmd_3d_id;
+   c->cmd_ta_id = cmd_ta_id;
+
+   c->ppp_ctrl = 0x203; // bit 0: OpenGL depth clipping
+
+   c->fb_width = framebuffer->width;
+   c->fb_height = framebuffer->height;
+
+   uint64_t depth_buffer = 0;
+   uint64_t stencil_buffer = 0;
+
+   agx_pack(&c->zls_ctrl, ZLS_CONTROL, zls_control) {
+
+      if (framebuffer->zsbuf) {
+         struct pipe_surface *zsbuf = framebuffer->zsbuf;
+         struct agx_resource *zsres = agx_resource(zsbuf->texture);
+         struct agx_resource *zres = NULL;
+         struct agx_resource *sres = NULL;
+
+         unsigned level = zsbuf->u.tex.level;
+
+         const struct util_format_description *desc = util_format_description(
+            agx_resource(zsbuf->texture)->layout.format);
+
+         assert(desc->format == PIPE_FORMAT_Z32_FLOAT ||
+                desc->format == PIPE_FORMAT_Z32_FLOAT_S8X24_UINT ||
+                desc->format == PIPE_FORMAT_S8_UINT);
+
+         c->depth_dimensions =
+            (framebuffer->width - 1) | ((framebuffer->height - 1) << 15);
+
+         if (util_format_has_depth(desc)) {
+            zres = zsres;
+            depth_buffer = agx_map_surface(zsbuf);
+         } else {
+            sres = zsres;
+            stencil_buffer = agx_map_surface(zsbuf);
+         }
+
+         if (zsres->separate_stencil) {
+            sres = zsres->separate_stencil;
+            stencil_buffer = agx_map_surface_resource(zsbuf, sres);
+         }
+
+         if (zres) {
+            bool valid = agx_resource_valid(zres, level);
+            bool clear = (batch->clear & PIPE_CLEAR_DEPTH);
+
+            zls_control.z_store_enable = (batch->resolve & PIPE_CLEAR_DEPTH);
+            zls_control.z_load_enable = valid && !clear;
+
+            unsigned offset = ail_get_level_offset_B(&zres->layout, level);
+            c->depth_buffer_1 = depth_buffer + offset;
+            c->depth_buffer_2 = depth_buffer + offset;
+            c->depth_buffer_3 = depth_buffer + offset;
+
+            if (ail_is_compressed(&zres->layout)) {
+               uint64_t accel_buffer =
+                  depth_buffer + zres->layout.metadata_offset_B;
+               accel_buffer += zres->layout.level_offsets_compressed_B[level];
+
+               c->depth_meta_buffer_1 = accel_buffer;
+               c->depth_meta_buffer_2 = accel_buffer;
+               c->depth_meta_buffer_3 = accel_buffer;
+
+               zls_control.z_compress_1 = true;
+               zls_control.z_compress_2 = true;
+            }
+         }
+
+         if (sres) {
+            bool valid = agx_resource_valid(sres, zsbuf->u.tex.level);
+            bool clear = (batch->clear & PIPE_CLEAR_STENCIL);
+
+            zls_control.s_store_enable = (batch->resolve & PIPE_CLEAR_STENCIL);
+            zls_control.s_load_enable = valid && !clear;
+
+            unsigned offset = ail_get_level_offset_B(&sres->layout, level);
+            c->stencil_buffer_1 = stencil_buffer + offset;
+            c->stencil_buffer_2 = stencil_buffer + offset;
+            c->stencil_buffer_3 = stencil_buffer + offset;
+
+            if (ail_is_compressed(&sres->layout)) {
+               uint64_t accel_buffer =
+                  stencil_buffer + sres->layout.metadata_offset_B;
+               accel_buffer += sres->layout.level_offsets_compressed_B[level];
+
+               c->stencil_meta_buffer_1 = accel_buffer;
+               c->stencil_meta_buffer_2 = accel_buffer;
+               c->stencil_meta_buffer_3 = accel_buffer;
+
+               zls_control.s_compress_1 = true;
+               zls_control.s_compress_2 = true;
+            }
+         }
+      }
+   }
+
+   if (clear_pipeline_textures)
+      c->flags |= ASAHI_RENDER_SET_WHEN_RELOADING_Z_OR_S;
+   else
+      c->flags |= ASAHI_RENDER_NO_CLEAR_PIPELINE_TEXTURES;
+
+   if (depth_buffer && !(batch->clear & PIPE_CLEAR_DEPTH))
+      c->flags |= ASAHI_RENDER_SET_WHEN_RELOADING_Z_OR_S;
+
+   if (stencil_buffer && !(batch->clear & PIPE_CLEAR_STENCIL))
+      c->flags |= ASAHI_RENDER_SET_WHEN_RELOADING_Z_OR_S;
+
+   if (dev->debug & AGX_DBG_NOCLUSTER)
+      c->flags |= ASAHI_RENDER_NO_VERTEX_CLUSTERING;
+
+   /* XXX sometimes ends in 8004, cbufs >= 5? */
+   c->load_pipeline_bind = 0xffff8002 | (clear_pipeline_textures ? 0x210 : 0);
+   /* XXX is this correct? */
+   c->load_pipeline = pipeline_clear | (framebuffer->nr_cbufs >= 4 ? 8 : 4);
+
+   /* XXX 0x2 with eMRT? */
+   c->store_pipeline_bind = 0x12;
+   c->store_pipeline = pipeline_store | 4;
+
+   c->isp_bgobjdepth = fui(clear_depth);
+   c->isp_bgobjvals = clear_stencil | 0x300;
+
+   c->utile_width = tib->tile_size.width;
+   c->utile_height = tib->tile_size.height;
+
+   c->samples = tib->nr_samples;
+   c->layers = 1;
+
+   switch (tib->nr_samples) {
+   case 1:
+      c->ppp_multisamplectl = 0x88;
+      break;
+   case 2:
+      c->ppp_multisamplectl = 0x44cc;
+      break;
+   case 4:
+      c->ppp_multisamplectl = 0xeaa26e26;
+      break;
+   }
+
+   c->iogpu_unk_49 = tib->sample_size_B;
+
+   /* XXX OR 0x80 with eMRT? */
+   c->iogpu_unk_212 = ALIGN_POT(agx_tilebuffer_total_size(tib), 2048) / 2048;
+   c->iogpu_unk_214 = 0xc000;
+
+   float tan_60 = 1.732051f;
+   c->merge_upper_x = fui(tan_60 / framebuffer->width);
+   c->merge_upper_y = fui(tan_60 / framebuffer->height);
+
+   /* XXX sometimes ends in 8214, cbufs >= 4? */
+   c->partial_reload_pipeline_bind = 0xffff8212;
+   c->partial_reload_pipeline = pipeline_load | 4;
+
+   c->partial_store_pipeline_bind = 0x12;
+   c->partial_store_pipeline = pipeline_store | 4;
+
+   c->scissor_array = scissor_ptr;
+   c->depth_bias_array = depth_bias_ptr;
+   c->visibility_result_buffer = visibility_result_ptr;
+
+   // TODO: optimize
+   c->flags |= ASAHI_RENDER_PROCESS_EMPTY_TILES;
+
+   for (unsigned i = 0; i < framebuffer->nr_cbufs; ++i) {
+      if (!framebuffer->cbufs[i])
+         continue;
+
+      asahi_add_attachment(att, agx_resource(framebuffer->cbufs[i]->texture),
+                           framebuffer->cbufs[i], ASAHI_ATTACHMENT_C);
+   }
+
+   if (framebuffer->zsbuf) {
+      struct agx_resource *rsrc = agx_resource(framebuffer->zsbuf->texture);
+
+      asahi_add_attachment(att, rsrc, framebuffer->zsbuf, ASAHI_ATTACHMENT_Z);
+
+      if (rsrc->separate_stencil && 0) {
+         asahi_add_attachment(att, rsrc->separate_stencil, framebuffer->zsbuf,
+                              ASAHI_ATTACHMENT_S);
+      }
+   }
+
+   c->attachments = (uint64_t)&att->list[0];
+   c->attachment_count = att->count;
+}
+
 /*
  * context
  */
@@ -1020,6 +1245,39 @@ agx_flush(struct pipe_context *pctx, struct pipe_fence_handle **fence,
    }
 }
 
+static void
+agx_flush_compute(struct agx_context *ctx, struct agx_batch *batch)
+{
+   struct agx_device *dev = agx_device(ctx->base.screen);
+
+   /* Finalize the encoder */
+   agx_pack(batch->encoder_current, CDM_STREAM_TERMINATE, _)
+      ;
+
+   agx_batch_add_bo(batch, batch->encoder);
+
+   unsigned cmdbuf_id = agx_get_global_id(dev);
+   unsigned encoder_id = agx_get_global_id(dev);
+
+   struct drm_asahi_cmd_compute cmdbuf = {
+      .flags = 0,
+      .encoder_ptr = batch->encoder->ptr.gpu,
+      .encoder_end =
+         batch->encoder->ptr.gpu +
+         (batch->encoder_current - (uint8_t *)batch->encoder->ptr.cpu),
+      .buffer_descriptor = 0,
+      .buffer_descriptor_size = 0,
+      .ctx_switch_prog = 0,
+      .encoder_id = encoder_id,
+      .cmd_id = cmdbuf_id,
+      .iogpu_unk_40 = 0x1c,
+      .iogpu_unk_44 = 0xffffffff,
+   };
+
+   agx_batch_submit(ctx, batch, BARRIER_RENDER | BARRIER_COMPUTE,
+                    DRM_ASAHI_CMD_COMPUTE, &cmdbuf);
+}
+
 void
 agx_flush_batch(struct agx_context *ctx, struct agx_batch *batch)
 {
@@ -1027,6 +1285,12 @@ agx_flush_batch(struct agx_context *ctx, struct agx_batch *batch)
 
    assert(agx_batch_is_active(batch));
    assert(!agx_batch_is_submitted(batch));
+
+   /* Compute batches use a different path */
+   if (batch->key.width == AGX_COMPUTE_BATCH_WIDTH) {
+      agx_flush_compute(ctx, batch);
+      return;
+   }
 
    /* Make sure there's something to submit. */
    if (!batch->clear && !batch->any_draws) {
@@ -1117,17 +1381,22 @@ agx_flush_batch(struct agx_context *ctx, struct agx_batch *batch)
    /* Size calculation should've been exact */
    assert(handle_i == handle_count);
 
-   /* TODO: Linux UAPI submission */
-   (void)dev;
-   (void)zbias;
-   (void)scissor;
-   (void)clear_pipeline_textures;
-   (void)pipeline_store;
-   (void)pipeline_background;
-   (void)pipeline_background_partial;
+   unsigned cmd_ta_id = agx_get_global_id(dev);
+   unsigned cmd_3d_id = agx_get_global_id(dev);
+   unsigned encoder_id = agx_get_global_id(dev);
 
-   unreachable("Linux UAPI not yet upstream");
-   agx_batch_submit(ctx, batch, 0, 0, NULL);
+   struct attachments att = {.count = 0};
+   struct drm_asahi_cmd_render cmdbuf;
+
+   agx_cmdbuf(dev, &cmdbuf, &att, &batch->pool, batch, &batch->key,
+              batch->encoder->ptr.gpu, encoder_id, cmd_ta_id, cmd_3d_id,
+              scissor, zbias, batch->occlusion_buffer.gpu, pipeline_background,
+              pipeline_background_partial, pipeline_store,
+              clear_pipeline_textures, batch->clear_depth, batch->clear_stencil,
+              &batch->tilebuffer_layout);
+
+   agx_batch_submit(ctx, batch, BARRIER_RENDER | BARRIER_COMPUTE,
+                    DRM_ASAHI_CMD_RENDER, &cmdbuf);
 }
 
 static void
