@@ -288,7 +288,7 @@ enum agx_dirty {
    AGX_DIRTY_QUERY = BITFIELD_BIT(13),
 };
 
-#define AGX_MAX_BATCHES (5)
+#define AGX_MAX_BATCHES (16)
 
 struct agx_context {
    struct pipe_context base;
