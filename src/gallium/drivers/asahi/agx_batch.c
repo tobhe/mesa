@@ -232,7 +232,7 @@ agx_get_batch_for_framebuffer(struct agx_context *ctx,
       }
    }
 
-   agx_sync_batch(ctx, batch);
+   agx_sync_batch_for_reason(ctx, batch, "Too many batches");
 
 got_batch:
    /* Batch is now free */
