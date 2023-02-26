@@ -214,7 +214,8 @@ ail_initialize_compression(struct ail_layout *layout)
       /* The compression buffer seems to have 8 bytes per 16 x 16 pixel block. */
       unsigned cmpw_el = DIV_ROUND_UP(util_next_power_of_two(width_px), 16);
       unsigned cmph_el = DIV_ROUND_UP(util_next_power_of_two(height_px), 16);
-      compbuf_B += ALIGN_POT(cmpw_el * cmph_el * 8, AIL_CACHELINE);
+      compbuf_B += ALIGN_POT(cmpw_el * cmph_el * 8 * layout->sample_count_sa,
+                             AIL_CACHELINE);
 
       width_px = DIV_ROUND_UP(width_px, 2);
       height_px = DIV_ROUND_UP(height_px, 2);
