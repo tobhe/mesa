@@ -29,6 +29,14 @@ struct miptest {
    uint32_t offsets[16];
 };
 
+struct miptiletest {
+   enum pipe_format format;
+   uint32_t width, height;
+   uint8_t levels;
+   uint32_t offsets[16];
+   uint32_t tile_sizes[16];
+};
+
 struct msaatest {
    enum pipe_format format;
    uint32_t width, height, depth;
@@ -48,7 +56,12 @@ static struct sizetest sizetests[] = {
 };
 
 static struct miptest miptests[] = {
+#include "miptree-compressed.txt"
 #include "miptree.txt"
+};
+
+static struct miptiletest miptiletests[] = {
+#include "miptree-tilesizes.txt"
 };
 
 static struct msaatest msaatests[] = {
@@ -127,7 +140,87 @@ TEST(Generated, Miptree2D)
             << test.width << "x" << test.height << " "
             << util_format_short_name(test.format)
             << " texture has wrong offset at level " << l << ", off by "
-            << test.offsets[l] - ail_get_level_offset_B(&layout, l);
+            << (int)test.offsets[l] - (int)ail_get_level_offset_B(&layout, l);
+      }
+   }
+}
+
+TEST(Generated, MiptreeTilesizes2D)
+{
+   for (unsigned i = 0; i < ARRAY_SIZE(miptiletests); ++i) {
+      struct miptiletest test = miptiletests[i];
+
+      struct ail_layout layout = {
+         .width_px = test.width,
+         .height_px = test.height,
+         .depth_px = 1,
+         .sample_count_sa = 1,
+         .levels = test.levels,
+         .tiling = AIL_TILING_TWIDDLED,
+         .format = test.format,
+      };
+
+      ail_make_miptree(&layout);
+
+      for (unsigned l = 0; l < test.levels; ++l) {
+         unsigned w_el =
+            util_format_get_nblocksx(test.format, u_minify(test.width, l));
+         unsigned blockw_px = util_format_get_blockwidth(test.format);
+         unsigned blockh_px = util_format_get_blockheight(test.format);
+
+         EXPECT_EQ(ail_get_level_offset_B(&layout, l), test.offsets[l])
+            << test.width << "x" << test.height << " "
+            << util_format_short_name(test.format)
+            << " texture has wrong offset at level " << l << ", off by "
+            << (int)test.offsets[l] - (int)ail_get_level_offset_B(&layout, l);
+
+         /* Stride is always exactly the width in elements, or plus one */
+         EXPECT_GE(layout.stride_el[l], w_el)
+            << test.width << "x" << test.height << " "
+            << util_format_short_name(test.format)
+            << " texture has wrong stride at level " << l;
+         EXPECT_LE(layout.stride_el[l], w_el + 1)
+            << test.width << "x" << test.height << " "
+            << util_format_short_name(test.format)
+            << " texture has wrong stride at level " << l;
+
+         bool stride_padding = layout.stride_el[l] > w_el;
+         unsigned logtile_width_el =
+            util_logbase2(layout.tilesize_el[l].width_el);
+         unsigned logtile_height_el =
+            util_logbase2(layout.tilesize_el[l].height_el);
+
+         /* Tile width is always equal to tile height, or double */
+         EXPECT_GE(logtile_width_el, logtile_height_el)
+            << test.width << "x" << test.height << " "
+            << util_format_short_name(test.format)
+            << " texture has invalid tile size at level " << l << " ("
+            << layout.tilesize_el[l].width_el << "x"
+            << layout.tilesize_el[l].height_el << ")";
+         EXPECT_LE(logtile_width_el, logtile_height_el + 1)
+            << test.width << "x" << test.height << " "
+            << util_format_short_name(test.format)
+            << " texture has invalid tile size at level " << l << " ("
+            << layout.tilesize_el[l].width_el << "x"
+            << layout.tilesize_el[l].height_el << ")";
+
+         /* Tile size index is the sum of the log tile sizes */
+         unsigned logtile_size = logtile_height_el + logtile_width_el;
+
+         /* Tile size mask in the test data is the mask of valid tile
+          * sizes without stride padding in the low 16 bits, and the mask
+          * of valid tile sizes with padding in the high 16 bits
+          */
+         unsigned expect_mask = 1 << (logtile_size + (stride_padding ? 16 : 0));
+
+         EXPECT_EQ(expect_mask, test.tile_sizes[l] & expect_mask)
+            << test.width << "x" << test.height << " "
+            << util_format_short_name(test.format) << " [" << blockw_px << "x"
+            << blockh_px << "]"
+            << " texture has wrong tile size at level " << l << ":"
+            << layout.tilesize_el[l].width_el << "x"
+            << layout.tilesize_el[l].height_el << " valid mask " << std::hex
+            << test.tile_sizes[l] << " got " << expect_mask;
       }
    }
 }
