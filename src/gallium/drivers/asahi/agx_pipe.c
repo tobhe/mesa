@@ -2321,7 +2321,7 @@ agx_get_shader_param(struct pipe_screen *pscreen, enum pipe_shader_type shader,
       return 0;
 
    case PIPE_SHADER_CAP_MAX_TEXTURE_SAMPLERS:
-      return 16;
+      return PIPE_MAX_SAMPLERS;
 
    case PIPE_SHADER_CAP_MAX_SAMPLER_VIEWS:
       return PIPE_MAX_SHADER_SAMPLER_VIEWS;
