@@ -2321,7 +2321,11 @@ agx_get_shader_param(struct pipe_screen *pscreen, enum pipe_shader_type shader,
       return 0;
 
    case PIPE_SHADER_CAP_MAX_TEXTURE_SAMPLERS:
-      return PIPE_MAX_SAMPLERS;
+      /* TODO: Enable when fully baked */
+      if (strcmp(util_get_process_name(), "blender") == 0)
+         return PIPE_MAX_SAMPLERS;
+      else
+         return 16;
 
    case PIPE_SHADER_CAP_MAX_SAMPLER_VIEWS:
       return PIPE_MAX_SHADER_SAMPLER_VIEWS;
