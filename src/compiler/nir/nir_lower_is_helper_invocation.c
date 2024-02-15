@@ -46,11 +46,13 @@ lower_load_and_store_is_helper(nir_builder *b,
    nir_deref_instr *is_helper_deref = (nir_deref_instr *)data;
 
    switch (intrin->intrinsic) {
+   case nir_intrinsic_discard:
    case nir_intrinsic_demote: {
       b->cursor = nir_before_instr(&intrin->instr);
       nir_store_deref(b, is_helper_deref, nir_imm_true(b), 1);
       return true;
    }
+   case nir_intrinsic_discard_if:
    case nir_intrinsic_demote_if: {
       b->cursor = nir_before_instr(&intrin->instr);
       nir_def *current_is_helper = nir_load_deref(b, is_helper_deref);

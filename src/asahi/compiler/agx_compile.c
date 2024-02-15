@@ -2946,6 +2946,7 @@ agx_preprocess_nir(nir_shader *nir, const nir_shader *libagx)
 
    if (nir->info.stage == MESA_SHADER_FRAGMENT) {
       NIR_PASS(_, nir, agx_nir_lower_frag_sidefx);
+      NIR_PASS(_, nir, nir_lower_is_helper_invocation);
    } else if (nir->info.stage == MESA_SHADER_VERTEX ||
               nir->info.stage == MESA_SHADER_TESS_EVAL) {
 
