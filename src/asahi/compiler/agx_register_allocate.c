@@ -45,7 +45,7 @@ struct phi_web_node {
    /* Rank, at most log2(n) so need ~5-bits */
    uint8_t rank;
 };
-static_assert(sizeof(struct phi_web_node) == 8);
+static_assert(sizeof(struct phi_web_node) == 8, "packed");
 
 static unsigned
 phi_web_find(struct phi_web_node *web, unsigned x)
