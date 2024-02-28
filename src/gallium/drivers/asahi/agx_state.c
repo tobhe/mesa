@@ -2287,18 +2287,16 @@ agx_create_shader_state(struct pipe_context *pctx,
    ralloc_free(nir);
    nir = NULL;
 
-   /* Precompile shaders that have no key */
+   /* Precompile shaders that have no key. For shader-db, precompile a shader
+    * with a default key. This could be improved but hopefully this is
+    * acceptable for now.
+    */
    if (so->type == PIPE_SHADER_TESS_CTRL) {
       union asahi_shader_key key = {0};
 
       agx_get_shader_variant(agx_screen(pctx->screen), pctx, so, &pctx->debug,
                              &key, NULL);
-   }
-
-   /* For shader-db, precompile a shader with a default key. This could be
-    * improved but hopefully this is acceptable for now.
-    */
-   if (dev->debug & AGX_DBG_PRECOMPILE) {
+   } else if (dev->debug & AGX_DBG_PRECOMPILE) {
       union asahi_shader_key key = {0};
 
       switch (so->type) {
