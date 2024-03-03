@@ -1,0 +1,63 @@
+mesa (24.0~pre20240228-0asahi3.23.10) mantic; urgency=medium
+
+  * Rebase to asahi-20240228 (eebfe841)
+    - Reset and rebase to upstream main branch
+      - https://gitlab.freedesktop.org/asahi/mesa
+    - Port debian packaging from 24.0~pre20231121-0asahi1
+  * Bump libdrm Dependency
+
+ --  <mark.esler@canonical.com>  Sun, 03 Mar 2024 17:34:45 +0000
+
+mesa (24.0~pre20231121-0asahi1.23.10) mantic; urgency=medium
+
+  * Bump wayland-protocols dependency
+
+ -- Tobias Heider <me@tobhe.de>  Thu, 23 Nov 2023 01:32:45 +0100
+
+mesa (24.0~pre20231121-0asahi0.23.10) mantic; urgency=medium
+
+  * Update to asahi-20231121
+
+ -- Tobias Heider <me@tobhe.de>  Wed, 22 Nov 2023 09:36:16 +0100
+
+mesa (23.3.0~pre20230904-1asahi1.23.10) mantic; urgency=medium
+
+  * Update to asahi-20230904
+
+ -- Tobias Heider <me@tobhe.de>  Sat, 30 Sep 2023 22:30:02 +0200
+
+mesa (23.3.0~pre20230821-1asahi1.23.04) lunar; urgency=medium
+
+  * Update to asahi-20230821
+
+ -- Tobias Heider <me@tobhe.de>  Thu, 31 Aug 2023 18:47:18 +0200
+
+mesa (23.3.0~pre20230801-1asahi1.23.04) lunar; urgency=medium
+
+  * Update to asahi-20230801
+
+ -- Tobias Heider <me@tobhe.de>  Thu, 10 Aug 2023 08:47:57 +0200
+
+mesa (23.2.0~pre20230615-1asahi1.23.04) lunar; urgency=medium
+
+  * Update to asahi-20230615
+
+ -- Tobias Heider <me@tobhe.de>  Sun, 16 Jul 2023 17:08:28 +0200
+
+mesa (23.2.0~pre20230606-1asahi1.23.04) lunar; urgency=medium
+
+  * Update to asahi-20230606
+
+ -- Tobias Heider <me@tobhe.de>  Sun, 11 Jun 2023 17:29:08 +0200
+
+mesa (23.1.0-1asahi2.23.04~pre20230311) lunar; urgency=medium
+
+  * Update to asahi-20230311
+
+ -- Tobias Heider <me@tobhe.de>  Thu, 23 Mar 2023 01:09:04 +0100
+
+mesa (23.0.0-1asahi1~pre20221205) kinetic; urgency=medium
+
+  * Import mesa upstream asahi version for AGX
+
+ -- Tobias Heider <me@tobhe.de>  Thu, 08 Dec 2022 14:27:18 +0100

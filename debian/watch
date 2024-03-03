@@ -1,0 +1,3 @@
+version=4
+opts=uversionmangle=s/^/23.3.0~pre/ \
+ https://gitlab.freedesktop.org/asahi/mesa/tags?sort=updated_desc archive/asahi-\d[\d.]+/mesa-asahi-([\d.]+)@ARCHIVE_EXT@
