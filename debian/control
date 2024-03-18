@@ -10,7 +10,7 @@ Build-Depends:
  meson (>= 0.45),
  quilt (>= 0.63-8.2~),
  pkg-config,
- libdrm-dev (>= 2.4.120-2),
+ libdrm-dev (>= 2.4.107-4),
  libx11-dev,
  libxxf86vm-dev,
  libexpat1-dev,
@@ -323,7 +323,7 @@ Depends:
  libgl-dev,
  libglx-dev,
  libx11-dev,
- libdrm-dev (>= 2.4.120-2) [!hurd-any],
+ libdrm-dev (>= 2.4.95) [!hurd-any],
  ${misc:Depends},
 Breaks: libegl1-mesa-dev (<< 18.2.5-2)
 Replaces: libegl1-mesa-dev (<< 18.2.5-2)
